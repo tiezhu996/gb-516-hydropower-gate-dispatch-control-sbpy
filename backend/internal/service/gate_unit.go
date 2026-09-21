@@ -124,6 +124,9 @@ func (s *gateUnitService) Transition(ctx context.Context, id uint, input dto.Tra
 	if !constants.CanTransition(constants.GateUnitTransitions, current.Status, target) {
 		return model.GateUnit{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, current.Status, target)
 	}
+	if target == string(constants.GateStateMoving) {
+		return model.GateUnit{}, fmt.Errorf("%w: moving a gate requires activating an approved dispatch permit", ErrPermitRequired)
+	}
 	before := current.Status
 	current.Status = target
 	current.Version = input.ExpectedVersion + 1

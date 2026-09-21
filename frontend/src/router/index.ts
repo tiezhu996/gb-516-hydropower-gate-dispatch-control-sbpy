@@ -6,6 +6,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
 	{ path: '/reservoirs', component: () => import('../pages/ReservoirPage.vue') },
 	{ path: '/gates', component: () => import('../pages/GateUnitPage.vue') },
 	{ path: '/directives', component: () => import('../pages/OperationDirectivePage.vue') },
+	{ path: '/permits', component: () => import('../pages/DispatchPermitPage.vue') },
 	{ path: '/confirmations', component: () => import('../pages/ExecutionConfirmationPage.vue') },
 	{ path: '/audit', component: () => import('../pages/AuditPage.vue'), meta: { roles: ['reviewer', 'admin'] } },
 ] });

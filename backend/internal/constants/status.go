@@ -50,11 +50,36 @@ var OperationDirectiveTransitions = map[string]map[string]bool{
 	"aborted":   {},
 }
 
+type PermitState string
+
+const (
+	PermitStateRequested   PermitState = "requested"
+	PermitStateApproved    PermitState = "approved"
+	PermitStateConsumed    PermitState = "consumed"
+	PermitStateRejected    PermitState = "rejected"
+	PermitStateInvalidated PermitState = "invalidated"
+	PermitStateExpired     PermitState = "expired"
+)
+
+var AllPermitState = []string{"requested", "approved", "consumed", "rejected", "invalidated", "expired"}
+
 var ExecutionConfirmationTransitions = map[string]map[string]bool{
 	"pending":   {"confirmed": true, "failed": true},
 	"confirmed": {},
 	"failed":    {"cancelled": true},
 	"cancelled": {},
+}
+
+// DispatchPermitTransitions guards 调度许可 lifecycle movement. Only one
+// requested/approved permit per directive is allowed, so every terminal side
+// path (reject, drift invalidation, expiry) must be explicit.
+var DispatchPermitTransitions = map[string]map[string]bool{
+	"requested":   {"approved": true, "rejected": true, "invalidated": true, "expired": true},
+	"approved":    {"consumed": true, "invalidated": true, "expired": true},
+	"consumed":    {},
+	"rejected":    {},
+	"invalidated": {},
+	"expired":     {},
 }
 
 func CanTransition(graph map[string]map[string]bool, from, to string) bool {

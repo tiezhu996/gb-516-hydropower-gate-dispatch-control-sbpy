@@ -12,6 +12,7 @@ import GateStateBadge from './common/GateStateBadge.vue';
 import MetricCard from './common/MetricCard.vue';
 import DirectiveTimeline from './common/DirectiveTimeline.vue';
 import ConfirmDialog from './common/ConfirmDialog.vue';
+import PermitPanel from './PermitPanel.vue';
 
 const props = defineProps<{ config: EntityConfig; store: any }>();
 const { session, can } = useAuth();
@@ -101,9 +102,13 @@ async function createRecord(): Promise<void> {
 
 function transitionsFor(item: DomainRecord): readonly string[] {
   return allowedTransitions(props.config.key, item.status).filter((target) => {
+    if (props.config.key === 'gateUnit') {
+      // Gates enter "moving" only by consuming an approved dispatch permit.
+      return target !== 'moving' && can('operator', 'admin');
+    }
     if (props.config.key !== 'operationDirective') return can('operator', 'admin');
-	if (target === 'completed') return false;
-    if (target === 'pending' || target === 'executing' || target === 'completed') return can('operator', 'admin');
+	if (target === 'completed' || target === 'executing') return false;
+    if (target === 'pending') return can('operator', 'admin');
     if (target === 'approved') return can('reviewer', 'admin') && item.submittedBy !== session.value?.username;
     if (target === 'aborted') return can('operator', 'reviewer', 'admin');
     return false;
@@ -142,6 +147,7 @@ async function confirmTransition(): Promise<void> {
       :records="store.items"
       :kind="config.key"
     />
+    <PermitPanel v-if="config.key === 'operationDirective'" />
 
     <section class="toolbar" aria-label="筛选工具栏">
       <el-input v-model="search" :prefix-icon="Search" :placeholder="`搜索${config.label}编码或名称`" clearable @keyup.enter="load" />

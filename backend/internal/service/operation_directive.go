@@ -134,26 +134,22 @@ func (s *operationDirectiveService) Transition(ctx context.Context, id uint, inp
 	if target == string(constants.DirectiveStateCompleted) {
 		return model.OperationDirective{}, fmt.Errorf("%w: completion is recorded by an execution confirmation", ErrInvalidTransition)
 	}
+	if target == string(constants.DirectiveStateExecuting) {
+		return model.OperationDirective{}, fmt.Errorf("%w: gate execution must start by consuming an approved dispatch permit", ErrPermitRequired)
+	}
 	if !directiveRoleAllowed(current.Status, target, role) {
 		return model.OperationDirective{}, ErrForbidden
 	}
 	var gate *model.GateUnit
 	var gateTarget string
-	if target == string(constants.DirectiveStateExecuting) || (current.Status == string(constants.DirectiveStateExecuting) && target == string(constants.DirectiveStateAborted)) {
+	if current.Status == string(constants.DirectiveStateExecuting) && target == string(constants.DirectiveStateAborted) {
 		linkedGate, gateErr := s.gates.GetByCode(ctx, current.RelatedCode)
 		if gateErr != nil {
 			return model.OperationDirective{}, fmt.Errorf("linked gate %q: %w", current.RelatedCode, gateErr)
 		}
-		if target == string(constants.DirectiveStateExecuting) && linkedGate.Status == string(constants.GateStateLocked) {
-			return model.OperationDirective{}, fmt.Errorf("%w: locked gate cannot execute a directive", ErrInvalidInput)
-		}
 		gate = &linkedGate
-		if target == string(constants.DirectiveStateAborted) {
-			gateTarget = string(constants.GateStateLocked)
-		} else if linkedGate.Status != current.GateState {
-			gateTarget = string(constants.GateStateMoving)
-		}
-		if gateTarget != "" && linkedGate.Status != gateTarget && !constants.CanTransition(constants.GateUnitTransitions, linkedGate.Status, gateTarget) {
+		gateTarget = string(constants.GateStateLocked)
+		if gate.Status != gateTarget && !constants.CanTransition(constants.GateUnitTransitions, gate.Status, gateTarget) {
 			return model.OperationDirective{}, fmt.Errorf("%w: gate %s cannot move from %s to %s", ErrInvalidTransition, linkedGate.Code, linkedGate.Status, gateTarget)
 		}
 	}

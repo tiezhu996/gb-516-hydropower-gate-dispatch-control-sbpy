@@ -25,3 +25,18 @@ func TestSafetyCriticalTransitionsCannotSkipRequiredStages(t *testing.T) {
 		t.Fatal("confirmed execution receipt must be terminal")
 	}
 }
+
+func TestDispatchPermitTransitionsGuardActiveLifecycle(t *testing.T) {
+	if CanTransition(DispatchPermitTransitions, "requested", "consumed") {
+		t.Fatal("permit must not be consumed before independent approval")
+	}
+	if CanTransition(DispatchPermitTransitions, "rejected", "approved") {
+		t.Fatal("rejected permit must be terminal and require a new application")
+	}
+	if CanTransition(DispatchPermitTransitions, "invalidated", "approved") {
+		t.Fatal("invalidated permit must be terminal")
+	}
+	if !CanTransition(DispatchPermitTransitions, "approved", "consumed") {
+		t.Fatal("approved permit must be consumable at action start")
+	}
+}

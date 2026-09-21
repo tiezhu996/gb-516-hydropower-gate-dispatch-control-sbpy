@@ -4,12 +4,16 @@ export type GateState = 'open' | 'closed' | 'moving' | 'locked';
 export const ALL_GATE_STATE: readonly GateState[] = ['open', 'closed', 'moving', 'locked'];
 export type DirectiveState = 'draft' | 'pending' | 'approved' | 'executing' | 'completed' | 'aborted';
 export const ALL_DIRECTIVE_STATE: readonly DirectiveState[] = ['draft', 'pending', 'approved', 'executing', 'completed', 'aborted'];
+export type PermitState = 'requested' | 'approved' | 'consumed' | 'rejected' | 'invalidated' | 'expired';
+export const ALL_PERMIT_STATE: readonly PermitState[] = ['requested', 'approved', 'consumed', 'rejected', 'invalidated', 'expired'];
+export type PermitAction = 'open' | 'close';
 
 export const ENTITY_TRANSITIONS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
 	reservoir: { normal: ['warning', 'critical'], warning: ['critical', 'restricted', 'normal'], critical: ['restricted', 'warning'], restricted: ['critical'] },
 	gateUnit: { open: ['moving', 'locked'], closed: ['moving', 'locked'], moving: ['open', 'closed', 'locked'], locked: ['closed'] },
 	operationDirective: { draft: ['pending'], pending: ['approved', 'aborted'], approved: ['executing', 'aborted'], executing: ['completed', 'aborted'], completed: [], aborted: [] },
 	executionConfirmation: { pending: ['confirmed', 'failed'], confirmed: [], failed: ['cancelled'], cancelled: [] },
+	dispatchPermit: { requested: ['approved', 'rejected'], approved: ['consumed', 'invalidated'], consumed: [], rejected: [], invalidated: [], expired: [] },
 };
 
 export function allowedTransitions(entity: string, status: string): readonly string[] {

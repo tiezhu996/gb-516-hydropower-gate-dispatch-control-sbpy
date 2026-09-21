@@ -18,9 +18,9 @@ docker compose ps
 
 | 账号 | 角色 | 主要权限 |
 |---|---|---|
-| `viewer` | 值班观察员 | 查看库区、闸门、指令和回执 |
-| `operator` | 现场操作员 | 新建、提交、执行和填写执行回执 |
-| `reviewer` | 安全复核员 | 独立批准/中止待审指令、查看审计 |
+| `viewer` | 值班观察员 | 查看库区、闸门、指令、调度许可和回执 |
+| `operator` | 现场操作员 | 新建、提交、执行和填写执行回执；申请和生效调度许可 |
+| `reviewer` | 安全复核员 | 独立批准/中止待审指令、批准/拒绝他人许可、查看审计 |
 | `admin` | 系统管理员 | 系统治理及删除草稿记录 |
 
 开发环境额外创建 `viewer`。生产空库会初始化 `admin`、`operator`、`reviewer` 三个职责分离账号，并强制要求三组互不相同的 12 位以上启动密码和至少 32 位的非占位 `JWT_SECRET`；已停用或降权账号的旧 Token 会在下一次请求立即失效。
@@ -38,17 +38,19 @@ docker compose down -v --remove-orphans
 | 库区 | `Reservoir` | `/api/reservoirs` | normal, warning, critical, restricted |
 | 闸门 | `GateUnit` | `/api/gates` | open, closed, moving, locked |
 | 操作指令 | `OperationDirective` | `/api/directives` | draft, pending, approved, executing, completed, aborted |
+| 调度许可 | `DispatchPermit` | `/api/permits` | requested, approved, consumed, rejected, invalidated, expired |
 | 执行确认 | `ExecutionConfirmation` | `/api/confirmations` | pending, confirmed, failed, cancelled |
 
 - JWT 登录和 viewer/operator/reviewer/admin 四级 RBAC；写接口在 Gin 路由层再次校验角色。
-- 指令严格按 `draft → pending → approved → executing` 推进，不允许跳过审批；`completed` 只能由有效执行回执原子触发，任意活动阶段可按权限中止。
+- 指令严格按 `draft → pending → approved → executing` 推进，不允许跳过审批；`approved → executing` 只能由调度许可生效原子触发；`completed` 只能由有效执行回执原子触发，任意活动阶段可按权限中止。
 - 提交人与批准人必须是两个不同账号。`DirectiveApproval` 逐条保存角色、意见、请求 ID 和时间，前端显示完整轨迹。
 - 所有状态变化使用乐观锁，并将业务状态、审批证据和不可覆盖审计日志放在同一个数据库事务中。
 - 库区、闸门、指令和执行回执逐级校验权威关联；不存在、跨区域或闭锁的对象不能进入下游流程。
+- 调度许可由操作员按已批准指令申请动作和有效期，系统在申请、批准、生效三个时点核对库区水位窗口、闸门归属、闭锁状态和闸门/指令版本；安全复核员只能批准他人申请，同一指令同时只允许一份生效许可（服务层校验加数据库唯一索引）。动作开始前条件变化时许可原子失效且不改写指令或闸门，需要重新申请；`PermitDecision` 保存申请、批准、拒绝、生效、失效与过期的完整证据链。
 - 指令开始执行时闸门原子进入 `moving`；成功回执同时完成指令并落定目标闸位，失败回执同时中止指令并闭锁闸门。
 - 请求 ID、结构化日志、全局错误映射和 Redis 分布式限流。
 - 提供脱敏运行配置、当前会话、审计汇总和单实体审计历史接口。
-- 业务工作台支持查询、新建、状态推进、风险标识及操作审计查看。
+- 业务工作台支持查询、新建、状态推进、调度许可申请与复核、风险标识及操作审计查看。
 
 ## 技术栈
 
@@ -86,7 +88,7 @@ cd ../frontend && npm run typecheck && npm run build
 cd .. && docker compose config --quiet
 ```
 
-也可以从项目根目录执行 `./scripts/validate.sh`。脚本会从空数据卷构建并启动全部服务，验证四级 RBAC、双人审批、状态红线、执行回执、请求 ID 和审计证据，并在结束时关闭容器。设置 `KEEP_RUNNING=1` 可在脚本验证后保留服务，供内置 Browser 验收。
+也可以从项目根目录执行 `./scripts/validate.sh`。脚本会从空数据卷构建并启动全部服务，验证四级 RBAC、双人审批、调度许可三时点核对与并发唯一、状态红线、执行回执、请求 ID 和审计证据，并在结束时关闭容器。设置 `KEEP_RUNNING=1` 可在脚本验证后保留服务，供内置 Browser 验收。
 
 ## 目录结构
 
@@ -108,9 +110,9 @@ cd .. && docker compose config --quiet
 │       └── util/                   # 统一 HTTP 响应
 ├── frontend/src/
 │   ├── api/                        # 按实体拆分的 API
-│   ├── components/common/          # 状态徽标、闸门徽标、指令轨迹和确认框
+│   ├── components/common/          # 状态徽标、闸门徽标、指令轨迹、许可轨迹和确认框
 │   ├── hooks/                      # RBAC 会话、分页和可见页轮询 hooks
-│   ├── pages/                      # 登录与五个业务路由页面
+│   ├── pages/                      # 登录与六个业务路由页面
 │   ├── router/                     # 路由配置
 │   ├── stores/                     # 按实体拆分的状态仓库
 │   ├── types/                      # 共享类型与枚举
@@ -125,6 +127,7 @@ cd .. && docker compose config --quiet
 |---|---|---|
 | `GateState` | `open, closed, moving, locked` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts`、`frontend/src/components/common/GateStateBadge.vue` |
 | `DirectiveState` | `draft, pending, approved, executing, completed, aborted` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts`、`frontend/src/components/common/DirectiveTimeline.vue` |
+| `PermitState` | `requested, approved, consumed, rejected, invalidated, expired` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts`、`frontend/src/components/common/PermitTimeline.vue` |
 
 每个实体自己的完整迁移图同样位于 `backend/internal/constants/status.go`；页面使用的状态列表位于 `frontend/src/types/status.ts`。修改状态时必须同步两处并更新对应服务测试。
 
@@ -149,6 +152,22 @@ token=$(curl -sS -X POST http://127.0.0.1:19516/api/auth/login \
 
 curl -sS http://127.0.0.1:19516/api/overview \
   -H "Authorization: Bearer $token"
+```
+
+调度许可必须挂在一份已批准指令上，由操作员申请、他人复核，动作开始前再次核对：
+
+```bash
+curl -sS -X POST http://127.0.0.1:19516/api/permits \
+  -H "Authorization: Bearer $operator_token" -H 'Content-Type: application/json' \
+  -d '{"code":"DP-20260921-01","name":"右岸泄洪闸开闸许可","directiveCode":"OD-20260921-01","action":"open","validFrom":"2026-09-21T08:00:00Z","validUntil":"2026-09-21T10:00:00Z","observedLevel":168.2}'
+
+curl -sS -X POST http://127.0.0.1:19516/api/permits/1/approve \
+  -H "Authorization: Bearer $reviewer_token" -H 'Content-Type: application/json' \
+  -d '{"expectedVersion":1,"reason":"水位窗口、闸门归属与闭锁状态复核通过"}'
+
+curl -sS -X POST http://127.0.0.1:19516/api/permits/1/activate \
+  -H "Authorization: Bearer $operator_token" -H 'Content-Type: application/json' \
+  -d '{"expectedVersion":2,"reason":"动作开始前再次核对水位与版本一致"}'
 ```
 
 ## License

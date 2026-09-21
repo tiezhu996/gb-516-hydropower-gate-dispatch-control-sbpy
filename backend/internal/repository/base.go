@@ -11,6 +11,7 @@ import (
 )
 
 var ErrVersionConflict = errors.New("record was changed by another request")
+var ErrActivePermitExists = errors.New("an active dispatch permit already exists for this directive")
 
 type Page[T any] struct {
 	Items    []T   `json:"items"`

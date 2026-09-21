@@ -82,6 +82,8 @@ func migrate(db *gorm.DB) error {
 		&model.OperationDirective{},
 		&model.DirectiveApproval{},
 		&model.ExecutionConfirmation{},
+		&model.DispatchPermit{},
+		&model.PermitDecision{},
 	)
 }
 
@@ -127,6 +129,10 @@ func Seed(ctx context.Context, db *gorm.DB, cfg config.Config) error {
 	}
 
 	if err := seedExecutionConfirmation(ctx, db); err != nil {
+		return err
+	}
+
+	if err := seedDispatchPermit(ctx, db); err != nil {
 		return err
 	}
 
@@ -236,4 +242,66 @@ func seedExecutionConfirmation(ctx context.Context, db *gorm.DB) error {
 		MetricValue: 37.5, MetricUnit: "%", EffectiveAt: now, Evidence: "待现场核对开度反馈、视频与水位变化", RelatedCode: "OD-003",
 	}}
 	return db.WithContext(ctx).Create(&items).Error
+}
+
+func seedDispatchPermit(ctx context.Context, db *gorm.DB) error {
+	var count int64
+	if err := db.WithContext(ctx).Model(&model.DispatchPermit{}).Count(&count).Error; err != nil || count > 0 {
+		return err
+	}
+	var directive model.OperationDirective
+	if err := db.WithContext(ctx).Where("code = ?", "OD-003").First(&directive).Error; err != nil {
+		return err
+	}
+	var gate model.GateUnit
+	if err := db.WithContext(ctx).Where("code = ?", "GU-003").First(&gate).Error; err != nil {
+		return err
+	}
+	var reservoir model.Reservoir
+	if err := db.WithContext(ctx).Where("code = ?", "R-003").First(&reservoir).Error; err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	appliedAt := now.Add(-90 * time.Minute)
+	approvedAt := now.Add(-30 * time.Minute)
+	consumedAt := directive.UpdatedAt
+	if consumedAt.IsZero() {
+		consumedAt = approvedAt
+	}
+	permit := model.DispatchPermit{
+		BaseModel: model.BaseModel{Code: "DP-001", Name: "右岸泄洪闸开启调度许可",
+			Status: "consumed", Version: 3,
+			Description: "示例许可：已由独立复核员批准并在动作开始时核销，闸门进入动作中"},
+		Facility:      directive.Facility,
+		DirectiveID:   directive.ID,
+		DirectiveCode: directive.Code,
+		GateID:        gate.ID,
+		GateCode:      gate.Code,
+		ReservoirCode: reservoir.Code,
+		Action:        "open",
+		ValidFrom:     now.Add(-2 * time.Hour),
+		ValidUntil:    now.Add(4 * time.Hour),
+		ObservedLevel: reservoir.MetricValue,
+		AppliedBy:     "operator", AppliedAt: &appliedAt,
+		AppliedReservoirStatus: reservoir.Status, AppliedReservoirVersion: reservoir.Version, AppliedLevel: reservoir.MetricValue,
+		AppliedGateStatus: "closed", AppliedGateVersion: gate.Version,
+		AppliedDirectiveStatus: "approved", AppliedDirectiveVersion: directive.Version,
+		ApprovedBy: "reviewer", ApprovedAt: &approvedAt,
+		ApprovedReservoirStatus: reservoir.Status, ApprovedReservoirVersion: reservoir.Version, ApprovedLevel: reservoir.MetricValue,
+		ApprovedGateStatus: "closed", ApprovedGateVersion: gate.Version,
+		ApprovedDirectiveStatus: "approved", ApprovedDirectiveVersion: directive.Version,
+		ConsumedAt: &consumedAt,
+	}
+	if err := db.WithContext(ctx).Create(&permit).Error; err != nil {
+		return err
+	}
+	decisions := []model.PermitDecision{
+		{PermitID: permit.ID, Stage: "requested", Actor: "operator", Role: model.RoleOperator, RequestID: "seed-dp-001-apply",
+			Reason: "操作员按已批准指令申请开闸许可", FromState: "", ToState: "requested", CreatedAt: appliedAt},
+		{PermitID: permit.ID, Stage: "approved", Actor: "reviewer", Role: model.RoleReviewer, RequestID: "seed-dp-001-approve",
+			Reason: "水位窗口、闸门归属与闭锁状态复核通过", FromState: "requested", ToState: "approved", CreatedAt: approvedAt},
+		{PermitID: permit.ID, Stage: "consumed", Actor: "operator", Role: model.RoleOperator, RequestID: "seed-dp-001-activate",
+			Reason: "动作前再次核对水位与版本一致，开始动作", FromState: "approved", ToState: "consumed", CreatedAt: consumedAt},
+	}
+	return db.WithContext(ctx).Create(&decisions).Error
 }

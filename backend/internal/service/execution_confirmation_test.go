@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func newExecutionWorkflow(t *testing.T) (ExecutionConfirmationService, OperationDirectiveService, repository.GateUnitRepository, repository.OperationDirectiveRepository, *gorm.DB) {
+func newExecutionWorkflow(t *testing.T) (ExecutionConfirmationService, OperationDirectiveService, DispatchPermitService, repository.GateUnitRepository, repository.OperationDirectiveRepository, repository.ReservoirRepository, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	if err != nil {
@@ -22,23 +22,30 @@ func newExecutionWorkflow(t *testing.T) (ExecutionConfirmationService, Operation
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&model.GateUnit{}, &model.OperationDirective{}, &model.DirectiveApproval{}, &model.ExecutionConfirmation{}, &model.AuditLog{}); err != nil {
+	if err := db.AutoMigrate(&model.Reservoir{}, &model.GateUnit{}, &model.OperationDirective{}, &model.DirectiveApproval{}, &model.ExecutionConfirmation{}, &model.DispatchPermit{}, &model.PermitDecision{}, &model.AuditLog{}); err != nil {
 		t.Fatalf("migrate test database: %v", err)
 	}
 	gateRepo := repository.NewGateUnitRepository(db)
+	reservoirRepo := repository.NewReservoirRepository(db)
 	directiveRepo := repository.NewOperationDirectiveRepository(db)
 	confirmationRepo := repository.NewExecutionConfirmationRepository(db)
+	permitRepo := repository.NewDispatchPermitRepository(db)
 	security := NewSecurityService(repository.NewSecurityRepository(db), config.Config{})
 	directives := NewOperationDirectiveService(directiveRepo, gateRepo, security)
 	confirmations := NewExecutionConfirmationService(confirmationRepo, directiveRepo, gateRepo, security)
-	gate := model.GateUnit{BaseModel: model.BaseModel{Code: "GU-FLOW", Name: "泄洪闸", Status: "closed", Version: 1}, Facility: "主坝", Owner: "运行一组"}
+	permits := NewDispatchPermitService(permitRepo, directiveRepo, gateRepo, reservoirRepo, security)
+	reservoir := model.Reservoir{BaseModel: model.BaseModel{Code: "R-FLOW", Name: "上游库区", Status: "normal", Version: 1}, Facility: "主坝", Owner: "运行一组", MetricValue: 168.2, MetricUnit: "m"}
+	if err := reservoirRepo.Create(context.Background(), &reservoir); err != nil {
+		t.Fatalf("create reservoir: %v", err)
+	}
+	gate := model.GateUnit{BaseModel: model.BaseModel{Code: "GU-FLOW", Name: "泄洪闸", Status: "closed", Version: 1}, Facility: "主坝", Owner: "运行一组", RelatedCode: "R-FLOW"}
 	if err := gateRepo.Create(context.Background(), &gate); err != nil {
 		t.Fatalf("create gate: %v", err)
 	}
-	return confirmations, directives, gateRepo, directiveRepo, db
+	return confirmations, directives, permits, gateRepo, directiveRepo, reservoirRepo, db
 }
 
-func prepareExecutingDirective(t *testing.T, directives OperationDirectiveService) model.OperationDirective {
+func prepareExecutingDirective(t *testing.T, directives OperationDirectiveService, permits DispatchPermitService) model.OperationDirective {
 	t.Helper()
 	ctx := context.Background()
 	created, err := directives.Create(ctx, dto.CreateOperationDirective{
@@ -58,9 +65,25 @@ func prepareExecutingDirective(t *testing.T, directives OperationDirectiveServic
 	if err != nil {
 		t.Fatalf("approve directive: %v", err)
 	}
-	executing, err := directives.Transition(ctx, approved.ID, dto.TransitionRequest{Status: "executing", ExpectedVersion: approved.Version, Reason: "现场开始执行"}, "operator", model.RoleOperator, "req-execute")
+	permit, err := permits.Apply(ctx, dto.CreateDispatchPermit{
+		Code: "DP-FLOW", Name: "泄洪闸开闸许可", DirectiveCode: "OD-FLOW", Action: "open",
+		ValidFrom: time.Now().UTC().Add(-time.Minute), ValidUntil: time.Now().UTC().Add(2 * time.Hour),
+		ObservedLevel: 168.2,
+	}, "operator", "req-permit-apply")
 	if err != nil {
-		t.Fatalf("execute directive: %v", err)
+		t.Fatalf("apply permit: %v", err)
+	}
+	permit, err = permits.Approve(ctx, permit.ID, dto.PermitReviewRequest{ExpectedVersion: permit.Version, Reason: "复核水位窗口和闭锁状态通过"}, "reviewer", model.RoleReviewer, "req-permit-approve")
+	if err != nil {
+		t.Fatalf("approve permit: %v", err)
+	}
+	_, err = permits.Activate(ctx, permit.ID, dto.PermitActivationRequest{ExpectedVersion: permit.Version, Reason: "动作前复核水位与版本一致，开始动作"}, "operator", model.RoleOperator, "req-permit-activate")
+	if err != nil {
+		t.Fatalf("activate permit: %v", err)
+	}
+	executing, err := directives.Get(ctx, approved.ID)
+	if err != nil {
+		t.Fatalf("reload executing directive: %v", err)
 	}
 	return executing
 }
@@ -79,11 +102,11 @@ func createPendingConfirmation(t *testing.T, confirmations ExecutionConfirmation
 }
 
 func TestExecutionConfirmationCompletesDirectiveAndGateAtomically(t *testing.T) {
-	confirmations, directives, gates, _, db := newExecutionWorkflow(t)
-	executing := prepareExecutingDirective(t, directives)
+	confirmations, directives, permits, gates, _, _, db := newExecutionWorkflow(t)
+	executing := prepareExecutingDirective(t, directives, permits)
 	gate, _ := gates.GetByCode(context.Background(), "GU-FLOW")
 	if gate.Status != "moving" {
-		t.Fatalf("gate should enter moving when directive executes, got %s", gate.Status)
+		t.Fatalf("gate should enter moving when permit activates, got %s", gate.Status)
 	}
 	pending := createPendingConfirmation(t, confirmations)
 	confirmed, err := confirmations.Transition(context.Background(), pending.ID, dto.TransitionRequest{
@@ -104,8 +127,8 @@ func TestExecutionConfirmationCompletesDirectiveAndGateAtomically(t *testing.T) 
 }
 
 func TestExecutionConfirmationRollsBackAllStateWhenAuditFails(t *testing.T) {
-	confirmations, directives, gates, _, db := newExecutionWorkflow(t)
-	executing := prepareExecutingDirective(t, directives)
+	confirmations, directives, permits, gates, _, _, db := newExecutionWorkflow(t)
+	executing := prepareExecutingDirective(t, directives, permits)
 	pending := createPendingConfirmation(t, confirmations)
 	if err := db.Migrator().DropTable(&model.AuditLog{}); err != nil {
 		t.Fatalf("drop audit table: %v", err)
