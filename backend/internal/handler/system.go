@@ -19,12 +19,13 @@ type SystemHandler struct {
 	gateUnit              service.GateUnitService
 	operationDirective    service.OperationDirectiveService
 	executionConfirmation service.ExecutionConfirmationService
+	dispatchPermit        service.DispatchPermitService
 	db                    *gorm.DB
 	redis                 *redis.Client
 }
 
-func NewSystemHandler(security service.SecurityService, reservoir service.ReservoirService, gateUnit service.GateUnitService, operationDirective service.OperationDirectiveService, executionConfirmation service.ExecutionConfirmationService, db *gorm.DB, redisClient *redis.Client) *SystemHandler {
-	return &SystemHandler{security: security, reservoir: reservoir, gateUnit: gateUnit, operationDirective: operationDirective, executionConfirmation: executionConfirmation, db: db, redis: redisClient}
+func NewSystemHandler(security service.SecurityService, reservoir service.ReservoirService, gateUnit service.GateUnitService, operationDirective service.OperationDirectiveService, executionConfirmation service.ExecutionConfirmationService, dispatchPermit service.DispatchPermitService, db *gorm.DB, redisClient *redis.Client) *SystemHandler {
+	return &SystemHandler{security: security, reservoir: reservoir, gateUnit: gateUnit, operationDirective: operationDirective, executionConfirmation: executionConfirmation, dispatchPermit: dispatchPermit, db: db, redis: redisClient}
 }
 
 func (h *SystemHandler) Login(c *gin.Context) {
@@ -89,6 +90,13 @@ func (h *SystemHandler) Overview(c *gin.Context) {
 		return
 	}
 	result["confirmations"] = executionConfirmationCounts
+
+	dispatchPermitCounts, err := h.dispatchPermit.StatusCounts(ctx)
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+	result["permits"] = dispatchPermitCounts
 
 	util.OK(c, result)
 }

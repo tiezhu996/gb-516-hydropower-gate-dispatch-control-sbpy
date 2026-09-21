@@ -38,6 +38,7 @@ docker compose down -v --remove-orphans
 | 库区 | `Reservoir` | `/api/reservoirs` | normal, warning, critical, restricted |
 | 闸门 | `GateUnit` | `/api/gates` | open, closed, moving, locked |
 | 操作指令 | `OperationDirective` | `/api/directives` | draft, pending, approved, executing, completed, aborted |
+| 调度许可 | `DispatchPermit` | `/api/permits` | pending, approved, active, rejected, invalidated, expired |
 | 执行确认 | `ExecutionConfirmation` | `/api/confirmations` | pending, confirmed, failed, cancelled |
 
 - JWT 登录和 viewer/operator/reviewer/admin 四级 RBAC；写接口在 Gin 路由层再次校验角色。
@@ -46,6 +47,10 @@ docker compose down -v --remove-orphans
 - 所有状态变化使用乐观锁，并将业务状态、审批证据和不可覆盖审计日志放在同一个数据库事务中。
 - 库区、闸门、指令和执行回执逐级校验权威关联；不存在、跨区域或闭锁的对象不能进入下游流程。
 - 指令开始执行时闸门原子进入 `moving`；成功回执同时完成指令并落定目标闸位，失败回执同时中止指令并闭锁闸门。
+- 调度许可只能由操作员基于 `approved` 指令申请动作（开/关）和有效期；系统核对库区水位窗口（normal/warning）、闸门归属（库区-闸门-指令同厂站）与闭锁状态，不符直接拒绝并返回具体原因。
+- 安全复核员只能批准/驳回**他人**的有效申请；批准前再次核对水位、归属、闭锁与闸门版本。动作开始前（activate）第三次核对水位和闸门版本，条件变化时许可原子置为 `invalidated` 并要求重新申请，失败路径不改写许可以外的指令或闸门状态。
+- 同一闸门同时只允许一份生效中的许可（数据库唯一槽位 + 有效期窗口）：重复申请返回 409，并发批准由乐观锁保证只有一份决定生效；有效期结束后槽位自动释放方可重新申请。
+- 许可申请、复核意见与动作前结论写入只增的 `PermitDecision`，并与审计日志、状态更新同事务提交；申请到结果全程可通过 `GET /api/permits/:id` 回读。RBAC 与审计接口不变：viewer 只读、operator 申请/开始动作、reviewer/admin 复核。
 - 请求 ID、结构化日志、全局错误映射和 Redis 分布式限流。
 - 提供脱敏运行配置、当前会话、审计汇总和单实体审计历史接口。
 - 业务工作台支持查询、新建、状态推进、风险标识及操作审计查看。
@@ -125,6 +130,7 @@ cd .. && docker compose config --quiet
 |---|---|---|
 | `GateState` | `open, closed, moving, locked` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts`、`frontend/src/components/common/GateStateBadge.vue` |
 | `DirectiveState` | `draft, pending, approved, executing, completed, aborted` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts`、`frontend/src/components/common/DirectiveTimeline.vue` |
+| `PermitState` | `pending, approved, active, rejected, invalidated, expired` | `backend/internal/constants/status.go`、`frontend/src/types/status.ts`、`frontend/src/pages/DispatchPermitPage.vue` |
 
 每个实体自己的完整迁移图同样位于 `backend/internal/constants/status.go`；页面使用的状态列表位于 `frontend/src/types/status.ts`。修改状态时必须同步两处并更新对应服务测试。
 

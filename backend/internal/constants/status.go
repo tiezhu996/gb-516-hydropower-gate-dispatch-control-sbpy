@@ -57,6 +57,31 @@ var ExecutionConfirmationTransitions = map[string]map[string]bool{
 	"cancelled": {},
 }
 
+type PermitState string
+
+const (
+	PermitStatePending     PermitState = "pending"
+	PermitStateApproved    PermitState = "approved"
+	PermitStateActive      PermitState = "active"
+	PermitStateRejected    PermitState = "rejected"
+	PermitStateInvalidated PermitState = "invalidated"
+	PermitStateExpired     PermitState = "expired"
+)
+
+var AllPermitState = []string{"pending", "approved", "active", "rejected", "invalidated", "expired"}
+
+var DispatchPermitTransitions = map[string]map[string]bool{
+	"pending":     {"approved": true, "rejected": true, "expired": true, "invalidated": true},
+	"approved":    {"active": true, "rejected": true, "expired": true, "invalidated": true},
+	"active":      {"expired": true, "invalidated": true},
+	"rejected":    {},
+	"invalidated": {},
+	"expired":     {},
+}
+
+// PermitReservoirStates is the 库区水位 window in which a gate action may be licensed.
+var PermitReservoirStates = map[string]bool{"normal": true, "warning": true}
+
 func CanTransition(graph map[string]map[string]bool, from, to string) bool {
 	targets, exists := graph[from]
 	return exists && targets[to]

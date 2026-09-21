@@ -17,6 +17,10 @@ func handleError(c *gin.Context, err error) {
 		util.Fail(c, http.StatusNotFound, "not_found", "record was not found")
 	case errors.Is(err, repository.ErrVersionConflict):
 		util.Fail(c, http.StatusConflict, "version_conflict", "record changed; refresh and retry")
+	case errors.Is(err, repository.ErrDuplicatePermit), errors.Is(err, service.ErrDuplicatePermit):
+		util.Fail(c, http.StatusConflict, "duplicate_permit", err.Error())
+	case errors.Is(err, service.ErrPermitInvalidated):
+		util.Fail(c, http.StatusConflict, "permit_invalidated", err.Error())
 	case errors.Is(err, service.ErrForbidden):
 		util.Fail(c, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, service.ErrTwoPersonRequired), errors.Is(err, service.ErrImmutableState):

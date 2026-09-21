@@ -82,6 +82,8 @@ func migrate(db *gorm.DB) error {
 		&model.OperationDirective{},
 		&model.DirectiveApproval{},
 		&model.ExecutionConfirmation{},
+		&model.DispatchPermit{},
+		&model.PermitDecision{},
 	)
 }
 

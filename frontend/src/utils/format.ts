@@ -21,7 +21,20 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
   confirmed: '已确认',
   failed: '失败',
   cancelled: '已取消',
+  active: '已生效',
+  rejected: '已驳回',
+  invalidated: '已失效',
+  expired: '已过期',
 };
+
+const ACTION_LABELS: Readonly<Record<string, string>> = {
+  open: '开启闸门',
+  closed: '关闭闸门',
+};
+
+export function actionLabel(action: string): string {
+  return ACTION_LABELS[action] || action;
+}
 
 const RISK_LABELS: Readonly<Record<string, string>> = {
   low: '低',

@@ -10,6 +10,7 @@ const navigation = [
   { to: '/reservoirs', label: '库区' },
   { to: '/gates', label: '闸门' },
   { to: '/directives', label: '操作指令' },
+  { to: '/permits', label: '调度许可' },
   { to: '/confirmations', label: '执行确认' },
   { to: '/audit', label: '审计记录', roles: ['reviewer', 'admin'] },
 ];

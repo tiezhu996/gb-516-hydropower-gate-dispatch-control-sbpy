@@ -40,6 +40,59 @@ export interface DirectiveApproval {
 	createdAt: string;
 }
 
+export interface PermitDecision {
+	id: number;
+	permitId: number;
+	stage: 'applied' | 'approved' | 'rejected' | 'activated' | 'invalidated';
+	actor: string;
+	role: string;
+	requestId: string;
+	reason: string;
+	fromState: string;
+	toState: string;
+	createdAt: string;
+}
+
+export interface DispatchPermit {
+	id: number;
+	code: string;
+	name: string;
+	status: string;
+	version: number;
+	description: string;
+	createdAt: string;
+	updatedAt: string;
+	facility: string;
+	owner: string;
+	category: string;
+	riskLevel: 'low' | 'medium' | 'high' | 'critical';
+	metricValue: number;
+	metricUnit: string;
+	evidence: string;
+	relatedCode: string;
+	gateCode: string;
+	reservoirCode: string;
+	action: 'open' | 'closed';
+	validFrom: string;
+	validUntil: string;
+	appliedBy?: string;
+	appliedAt?: string;
+	approvedBy?: string;
+	approvedAt?: string;
+	activatedBy?: string;
+	activatedAt?: string;
+	closedBy?: string;
+	closedAt?: string;
+	invalidReason?: string;
+	snapshotReservoirStatus: string;
+	snapshotGateStatus: string;
+	snapshotGateVersion: number;
+	snapshotReservoirVersion: number;
+	snapshotDirectiveVersion: number;
+	approvedGateVersion: number;
+	decisions?: PermitDecision[];
+}
+
 export interface PageMeta { page: number; pageSize: number; total: number }
 export interface ApiEnvelope<T> { data: T; error?: string; message?: string; meta?: PageMeta }
 export interface UserSession { token: string; username: string; displayName: string; role: string; expiresIn: number; expiresAt: number }
